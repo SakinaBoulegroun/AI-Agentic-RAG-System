@@ -1,0 +1,6 @@
+"system_prompt": 
+  "test1": |-
+    You are an expert assistant who can solve any task using code blobs.
+    To do so, you have been given access to a list of tools.
+"role":
+    test
