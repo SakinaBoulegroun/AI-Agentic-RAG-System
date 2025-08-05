@@ -1,4 +1,4 @@
-from smolagents import CodeAgent,DuckDuckGoSearchTool, InferenceClientModel,load_tool,tool
+from smolagents import CodeAgent, InferenceClientModel,load_tool,tool
 import datetime
 import requests
 import pytz
@@ -6,6 +6,9 @@ import yaml
 from tools.final_answer import FinalAnswerTool
 from tools.visit_webpage import VisitWebpageTool
 from duckduckgo_search import DDGS
+from transformers import pipeline
+import langdetect
+import fitz  
 
 from Gradio_UI import GradioUI
 
@@ -43,11 +46,64 @@ def visit_webpage(url: str) -> str:
     visit_tool=VisitWebpageTool()
     return visit_tool.forward(url)
 
-# Import tool from Hub
-image_generation_tool = load_tool("agents-course/text-to-image", trust_remote_code=True)
+@tool
+def summarize_document(text: str, max_length: int = 300) -> str:
+    """Summarize a long document or text into a shorter summary.
+    Args:
+        text: the full text of the document to summarize
+        max_length: max length of the summary
+    """
+    from transformers import pipeline
+    summarizer = pipeline("summarization")
+    summary = summarizer(text, max_length=max_length, min_length=30, do_sample=False)
+    return summary[0]['summary_text']
 
-# If the agent does not answer, the model is overloaded, please use another model or the following Hugging Face Endpoint that also contains qwen2.5 coder:
-# model_id='https://pflgm2locj2t89co.us-east-1.aws.endpoints.huggingface.cloud' 
+
+@tool
+def extract_information_from_pdf(file_path: str, query: str) -> str:
+    """Extract specific information from a PDF document based on a query.
+    
+    Args:
+        file_path: path to the PDF file
+        query: keyword or question to find in the document
+    """
+    try:
+        doc = fitz.open(file_path)
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text()
+
+        if query.lower() in full_text.lower():
+            start = full_text.lower().index(query.lower())
+            excerpt = full_text[max(0, start - 100):start + 300]
+            return f"Found excerpt related to '{query}':\n\n{excerpt.strip()}"
+        else:
+            return f"No information found for '{query}'."
+
+    except Exception as e:
+        return f"Error reading PDF: {str(e)}"
+
+
+@tool
+def detect_language(text: str) -> str:
+    """Detect the language of the input text.
+    Args:
+        text: text whose language should be detected
+    """
+    lang = langdetect.detect(text)
+    return lang
+
+
+@tool
+def clean_text(text: str) -> str:
+    """Clean and preprocess text by removing extra whitespace, newlines, etc.
+    Args:
+        text: raw text input
+    """
+    import re
+    cleaned = re.sub(r'\s+', ' ', text).strip()
+    return cleaned
+
 
 final_answer = FinalAnswerTool()
 
@@ -55,8 +111,9 @@ final_answer = FinalAnswerTool()
 model = InferenceClientModel (
 max_tokens=2096,
 temperature=0.5,
-model_id='Qwen/Qwen2.5-Coder-32B-Instruct',# it is possible that this model may be overloaded
+model_id='Qwen/Qwen2.5-Coder-32B-Instruct',
 custom_role_conversions=None,
+api_key="ADD YOUR API KEY"
 )
 
 with open("prompts.yaml", 'r') as stream:
@@ -64,7 +121,8 @@ with open("prompts.yaml", 'r') as stream:
     
 agent = CodeAgent(
     model=model,
-    tools=[final_answer, web_search, image_generation_tool, visit_webpage], 
+    tools=[final_answer, web_search, visit_webpage, summarize_document, extract_information_from_pdf,
+           detect_language, clean_text], 
     max_steps=6,
     verbosity_level=1,
     grammar=None,
